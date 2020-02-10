@@ -1,0 +1,107 @@
+install.packages('tidyverse')
+install.packages("devtools")
+
+#May need to update the rlang package upon restart
+#remotes::update_packages("rlang")
+
+devtools::install_github("meysubb/cfbscrapR")
+remotes::install_github("rstudio/gt")
+
+#Install and run the Rcpp package if not done
+
+library(tidyverse)
+library(cfbscrapR)
+library(gt)
+library(dplyr)
+library(ggplot2)
+
+pbp_2019 <- data.frame()
+for(i in 1:15){
+  data <- cfb_pbp_data(year = 2019, season_type = "both", week = i, epa_wpa = TRUE) %>% mutate(week = i)
+  df <- data.frame(data)
+  pbp_2019 <- bind_rows(pbp_2019, df)
+}
+
+#To clean up what we want to see that's useable
+pbp_2019 %>% select(offense_play, defense_play, down, distance, play_type, yards_gained) %>% head()
+
+#Creating a plays variable
+plays <- pbp_2019 %>% filter(rush == 1 | pass == 1)
+
+#Looking at offensive plays
+offense <- plays %>% group_by(offense_play) %>% summarise(ypa = mean(yards_gained[pass==1]), ypr = mean(yards_gained[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
+
+#Creating EPA variable
+offense <- plays %>% group_by(offense_play) %>% summarise(epa.pass.off = mean(EPA[pass==1]), epa.rush.off = mean(EPA[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
+defense <- plays %>% group_by(defense_play) %>% summarise(epa.pass.def = mean(EPA[pass==1]), epa.rush.def = mean(EPA[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
+team.epa <- left_join(offense, defense, by = c("offense_play" = "defense_play")) 
+head(team.epa)
+
+#Creating a success rate variable
+success.rate.offense <- plays %>% group_by(offense_play) %>% summarise(success.rate = mean(success), num.plays = n()) %>% filter(num.plays > 300)
+
+#Merging success rate with team.epa
+team.epa <- dplyr::left_join(team.epa, success.rate, by="offense_play")
+
+###############################################
+#Create a table that will be used for Shiny app
+###############################################
+team.epa %>% 
+  select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def) %>% gt() %>%
+  tab_header(title = "2019 Season") %>%
+  cols_label(offense_play = "Team", 
+             success.rate = "Success Rate", 
+             epa.pass.off = "Pass EPA",
+             epa.rush.off = "Run EPA",
+             epa.pass.def = "Pass EPA Def.",
+             epa.rush.def = "Run EPA Def."
+  )
+
+###Building the app
+
+cfb.table <- team.epa %>% 
+  select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def) %>% gt() %>%
+  tab_header(title = "2019 Season") %>%
+  cols_label(offense_play = "Team", 
+             success.rate = "Success Rate", 
+             epa.pass.off = "Pass EPA",
+             epa.rush.off = "Run EPA",
+             epa.pass.def = "Pass EPA Def.",
+             epa.rush.def = "Run EPA Def."
+  )
+
+
+###Building the app
+
+library(shiny)
+library(DT)
+
+cfb.table <- team.epa %>% 
+  select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def) %>% gt() %>%
+  tab_header(title = "2019 Season") %>%
+  cols_label(offense_play = "Team", 
+             success.rate = "Success Rate", 
+             epa.pass.off = "Pass EPA",
+             epa.rush.off = "Run EPA",
+             epa.pass.def = "Pass EPA Def.",
+             epa.rush.def = "Run EPA Def."
+  )
+
+
+
+#Define the user interface
+ui <- basicPage(
+  h1("College Football Analytics"),
+  DT::dataTableOutput("table")
+)
+
+
+#Define server logic
+server <- function(input, output) {
+  output$table = DT::renderDataTable({
+    team.epa
+  })
+}
+
+#Run the application
+shinyApp(ui = ui, server = server)
