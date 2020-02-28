@@ -42,9 +42,6 @@ success.rate.offense <- plays %>% group_by(offense_play) %>% summarise(success.r
 team.epa$success.rate <- success.rate.offense$success.rate
 
 
-#Merging success rate with team.epa
-team.epa <- dplyr::left_join(team.epa, success.rate, by="offense_play")
-
 ###Computing Drives
 # merge games and drives data and convert starting
 #yard line to consistent scale - opposite of
@@ -85,15 +82,7 @@ team.epa <- left_join(team.epa, drives.off, by="offense_play")
 ###############################################
 cfb.table <- data.frame(team.epa %>% 
                           select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def, fp, drives) %>% gt() %>%
-                          tab_header(title = "2019 Season") %>%
-                          cols_label(offense_play = "Team", 
-                                     success.rate = "Success Rate", 
-                                     epa.pass.off = "Pass EPA",
-                                     epa.rush.off = "Run EPA",
-                                     epa.pass.def = "Pass EPA Def.",
-                                     epa.rush.def = "Run EPA Def.",
-                                     fp = "Avg. Field Position",
-                                     drives = "Number of Drives"))
+                          tab_header(title = "2019 Season"))
 
 #Define the user interface
 ui <- fluidPage(
@@ -108,6 +97,12 @@ server <- function(input, output) {
     datatable(cfb.table,
               rownames = FALSE, 
               class = 'cell-border stripe',
+              colnames = c('Team', 'Success Rate',
+                           'Pass EPA', 'Run EPA',
+                           'Pass EPA Def.',
+                           'Run EPA Def.',
+                           'Avg. Starting LOS',
+                           'Drives'),
               list(pageLength = 25)) %>%
       formatPercentage(c('success.rate'),1) %>%
       formatRound(c('epa.pass.off'),3) %>%
