@@ -14,6 +14,7 @@ library(cfbscrapR)
 library(gt)
 library(dplyr)
 library(ggplot2)
+library(DT)
 
 pbp_2019 <- data.frame()
 for(i in 1:15){
