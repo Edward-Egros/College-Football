@@ -64,25 +64,26 @@ games <- cfb_game_info(2019) %>% rename("game_id" = id)
 drives.off <- drives_2019 %>% left_join(games, by = c("game_id")) %>%
   mutate(
     adj_start_yardline = ifelse(offense == away_team, 100-start_yardline, start_yardline), 
-    success = ifelse(drive_result %in% c("TD", "FG"), 1, 0)) %>%
+    success = ifelse(drive_result %in% c("TD", "FG"), 1, 0),
+    drive.pts = ifelse(drive_result == "TD", 6, ifelse(drive_result == "FG", 3, 0))) %>%
   group_by(offense) %>% 
   summarise(
     fp = mean(adj_start_yardline[adj_start_yardline > 10 & adj_start_yardline <40]), 
     srate = mean(success),
-    drives = n())
+    drives = n(),
+    drives.pts = sum(drive.pts))
 
 #Merge drive data for app
 names(drives.off)[names(drives.off) == "offense"] <- "offense_play"
 team.epa <- left_join(team.epa, drives.off, by="offense_play")
-
-
+team.epa$pts.per.drive <- team.epa$drives.pts / team.epa$drives
 
 
 ###############################################
 #Create a table that will be used for Shiny app
 ###############################################
 cfb.table <- data.frame(team.epa %>% 
-                          select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def, fp, drives) %>% gt() %>%
+                          select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def, fp, drives, pts.per.drive) %>% gt() %>%
                           tab_header(title = "2019 Season"))
 
 #Define the user interface
@@ -102,15 +103,17 @@ server <- function(input, output) {
                            'Pass EPA', 'Run EPA',
                            'Pass EPA Def.',
                            'Run EPA Def.',
-                           'Avg. Starting LOS',
-                           'Drives'),
+                           'Avg. Field Position',
+                           'Drives',
+                           'Points Per Drive'),
               list(pageLength = 25)) %>%
       formatPercentage(c('success.rate'),1) %>%
       formatRound(c('epa.pass.off'),3) %>%
       formatRound(c('epa.rush.off'),3) %>%
       formatRound(c('epa.pass.def'),3) %>%
       formatRound(c('epa.rush.def'),3) %>%
-      formatRound(c('fp'),1)
+      formatRound(c('fp'),1) %>%
+      formatRound(c('pts.per.drive'),3)
   })
 }
 
