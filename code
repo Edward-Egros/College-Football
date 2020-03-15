@@ -15,6 +15,8 @@ library(gt)
 library(dplyr)
 library(ggplot2)
 library(DT)
+library(shiny)
+library(shinythemes)
 
 pbp_2019 <- data.frame()
 for(i in 1:15){
@@ -24,19 +26,15 @@ for(i in 1:15){
 }
 
 #To clean up what we want to see that's useable
-pbp_2019 %>% select(offense_play, defense_play, down, distance, play_type, yards_gained) %>% head()
+pbp_2019_select <- pbp_2019 %>% select(offense_play, defense_play, down, distance, play_type, yards_gained, week, EPA, success, rush, pass)
 
 #Creating a plays variable
-plays <- pbp_2019 %>% filter(rush == 1 | pass == 1)
-
-#Looking at offensive plays
-offense <- plays %>% group_by(offense_play) %>% summarise(ypa = mean(yards_gained[pass==1]), ypr = mean(yards_gained[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
+plays <- pbp_2019_select %>% filter(rush == 1 | pass == 1)
 
 #Creating EPA variable
-offense <- plays %>% group_by(offense_play) %>% summarise(epa.pass.off = mean(EPA[pass==1]), epa.rush.off = mean(EPA[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
+offense <- plays %>% group_by(offense_play) %>% summarise(ypa = mean(yards_gained[pass==1]), ypr = mean(yards_gained[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
 defense <- plays %>% group_by(defense_play) %>% summarise(epa.pass.def = mean(EPA[pass==1]), epa.rush.def = mean(EPA[rush==1]), num.plays = n()) %>% filter(num.plays > 300)
 team.epa <- left_join(offense, defense, by = c("offense_play" = "defense_play")) 
-head(team.epa)
 
 #Creating a success rate variable
 success.rate.offense <- plays %>% group_by(offense_play) %>% summarise(success.rate = mean(success), num.plays = n()) %>% filter(num.plays > 300)
@@ -80,23 +78,72 @@ team.epa$pts.per.drive <- team.epa$drives.pts / team.epa$drives
 
 
 ###############################################
-#Create a table that will be used for Shiny app
+#Create Shiny app
 ###############################################
-cfb.table <- data.frame(team.epa %>% 
-                          select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def, fp, drives, pts.per.drive) %>% gt() %>%
-                          tab_header(title = "2019 Season"))
-
 #Define the user interface
 ui <- fluidPage(
-  h1("College Football Analytics"),
-  DT::dataTableOutput("table"),
-  theme = shinytheme("cerulean")
+  titlePanel(h1("College Football Analytics")),
+  sidebarPanel(
+    checkboxGroupInput("selections", label = h2(
+      "Choose Weeks to Analyze"),
+      choices = list("Week 1" = 1, "Week 2" = 2,
+                     "Week 3" = 3, "Week 4" = 4,
+                     "Week 5" = 5, "Week 6" = 6,
+                     "Week 7" = 7, "Week 8" = 8,
+                     "Week 9" = 9, "Week 10" = 10,
+                     "Week 11" = 11, "Week 12" = 12,
+                     "Week 13" = 13, "Week 14" = 14,
+                     "Week 15" = 15),
+      selected = c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
+                   "12", "13", "14", "15")),
+    actionButton("submit", "Update")
+  ),
+  mainPanel(
+    h2("2019 Season"),
+    DT::dataTableOutput("table"),
+    theme = shinytheme("cerulean")
+  )
 )
 
 #Define server logic
 server <- function(input, output) {
+  cfb.table2 <- reactive({
+    input$submit
+    isolate({
+      req(input$selections)
+      new.pbp_2019 <- subset(pbp_2019, week %in% input$selections)})
+  })
+  plays <- reactive({cfb.table2() %>% filter(rush == 1 | pass == 1)})
+  offense <- reactive({plays() %>% group_by(offense_play) %>% summarise(ypa = mean(yards_gained[pass==1]), ypr = mean(yards_gained[rush==1]), num.plays = n()) %>% filter(num.plays > 300)})
+  offense <- reactive({plays() %>% group_by(offense_play) %>% summarise(epa.pass.off = mean(EPA[pass==1]), success.rate = mean(success), epa.rush.off = mean(EPA[rush==1]), num.plays = n()) %>% filter(num.plays > 300)})
+  defense <- reactive({plays() %>% group_by(defense_play) %>% summarise(epa.pass.def = mean(EPA[pass==1]), epa.rush.def = mean(EPA[rush==1]), num.plays = n()) %>% filter(num.plays > 300)})
+  update.epa <- reactive({left_join(offense(), defense(), by = c("offense_play" = "defense_play"))})
+  drives.table2 <- reactive({
+    input$submit
+    isolate({
+      req(input$selections)
+      new.drives_2019 <- subset(drives_2019, week %in% input$selections)})
+  })
+  games <- cfb_game_info(2019) %>% rename("game_id" = id)
+  drives.off <- reactive({drives.table2() %>% left_join(games, by = c("game_id")) %>%
+      mutate(
+        adj_start_yardline = ifelse(offense == away_team, 100-start_yardline, start_yardline), 
+        success = ifelse(drive_result %in% c("TD", "FG"), 1, 0),
+        drive.pts = ifelse(drive_result == "TD", 6, ifelse(drive_result == "FG", 3, 0))) %>%
+      group_by(offense) %>% 
+      summarise(
+        fp = mean(adj_start_yardline[adj_start_yardline > 10 & adj_start_yardline <40]), 
+        srate = mean(success),
+        drives = n(),
+        drives.pts = sum(drive.pts))
+  })
+  drive.update.epa <- reactive({left_join(update.epa(), drives.off(), by=c("offense_play"="offense")) %>%
+      mutate(pts.per.drive = drives.pts / drives)})
+  cfb.table3 <- reactive({data.frame(drive.update.epa() %>% 
+                                       select(offense_play, success.rate, epa.pass.off, epa.rush.off, epa.pass.def, epa.rush.def, fp, drives, pts.per.drive) %>% gt() %>%
+                                       tab_header(title = "2019 Season"))})
   output$table = DT::renderDataTable({
-    datatable(cfb.table,
+    datatable(cfb.table3(),
               rownames = FALSE, 
               class = 'cell-border stripe',
               colnames = c('Team', 'Success Rate',
